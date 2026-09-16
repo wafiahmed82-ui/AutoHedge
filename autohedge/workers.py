@@ -16,6 +16,7 @@ from autohedge.prompts import (
 )
 from autohedge.tools.exa_search_tool import exa_search
 from autohedge.tools.quiver_research import quiver_research
+from autohedge.tools.trade_suggestion import trade_suggestion
 
 _NOW = datetime.now()
 _DATE_TIME_LINE = _NOW.strftime("%A, %B %d, %Y at %H:%M")
@@ -55,18 +56,19 @@ alternative_data_agent = Agent(
 risk_agent = Agent(
     agent_name="Risk-Manager",
     system_prompt=RISK_PROMPT.strip()
-    + "\n\nWhen you receive a message, it will contain:\nStock, Thesis, Quant Analysis, and Alternative-Data Research.\n\nProvide risk assessment including:\n1. Recommended position size\n2. Maximum drawdown risk\n3. Market risk exposure\n4. Overall risk score\n5. Conflicts or data-quality warnings",
+    + "\n\nWhen you receive a message, it will contain:\nStock, Thesis, Quant Analysis, and Alternative-Data Research.\n\nProvide risk assessment including:\n1. Recommended position size\n2. Maximum drawdown risk\n3. Market risk exposure\n4. Overall risk score\n5. Conflicts or data-quality warnings\n\nUse trade_suggestion when explicit capital, protected reserve, entry, and stop values are available. Treat its result as a deterministic sizing calculation. Do not place or request an order. A user-entered amount is an explicit manual choice: calculate its downside and flag limit breaches rather than silently changing it.",
     model_name="gpt-4.1",
     output_type="str",
     max_loops=1,
     verbose=True,
+    tools=[trade_suggestion],
     context_length=16000,
 )
 
 execution_agent = Agent(
     agent_name="Execution-Agent",
     system_prompt=EXECUTION_PROMPT.strip()
-    + "\n\nWhen you receive a message, it will contain:\nStock, Thesis, Risk Assessment.\n\nGenerate trade order including:\n1. Order type (market/limit)\n2. Quantity\n3. Entry price\n4. Stop loss\n5. Take profit\n6. Time in force",
+    + "\n\nWhen you receive a message, it will contain:\nStock, Thesis, Risk Assessment.\n\nGenerate trade order including:\n1. Order type (market/limit)\n2. Quantity\n3. Entry price\n4. Stop loss\n5. Take profit\n6. Time in force\n\nExecution is a separate stage from Trade Suggestion. Never treat a suggestion-button result as permission to submit an order.",
     model_name="gpt-4.1",
     output_type="str",
     max_loops=1,
