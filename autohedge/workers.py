@@ -1,6 +1,6 @@
 """
-AutoHedge workers: Pydantic output models and agents for thesis
-generation, risk assessment, execution, and quantitative analysis.
+AutoHedge workers: thesis generation, alternative-data research, risk, execution,
+and quantitative analysis.
 """
 
 from datetime import datetime
@@ -15,9 +15,10 @@ from autohedge.prompts import (
     SENTIMENT_PROMPT,
 )
 from autohedge.tools.exa_search_tool import exa_search
+from autohedge.tools.quiver_research import quiver_research
+from autohedge.tools.trade_suggestion import trade_suggestion
 
 _NOW = datetime.now()
-# Exact date and time for all agent system prompts (simple, single line)
 _DATE_TIME_LINE = _NOW.strftime("%A, %B %d, %Y at %H:%M")
 if _NOW.tzinfo:
     _DATE_TIME_LINE += f" {_NOW.tzname() or ''}"
@@ -32,23 +33,42 @@ sentiment_agent = Agent(
     tools=[exa_search],
 )
 
-risk_agent = Agent(
-    agent_name="Risk-Manager",
-    system_prompt=RISK_PROMPT.strip()
-    + "\n\nWhen you receive a message, it will contain:\nStock, Thesis, Quant Analysis.\n\nProvide risk assessment including:\n1. Recommended position size\n2. Maximum drawdown risk\n3. Market risk exposure\n4. Overall risk score"
-    + _SYSTEM_SUFFIX,
+alternative_data_agent = Agent(
+    agent_name="Alternative-Data-Researcher",
+    system_prompt=(
+        "You are a read-only alternative-data research analyst. "
+        "Use Quiver Quantitative evidence when a ticker is supplied. "
+        "Cross-check congressional activity, insider activity, government "
+        "contracts, and other available datasets. Distinguish observed data "
+        "from interpretation. Never treat alternative data alone as a buy/sell "
+        "instruction and never place or request an order. Return concise, "
+        "source-aware JSON-friendly findings and explicitly report missing data."
+        + _SYSTEM_SUFFIX
+    ),
     model_name="gpt-4.1",
     output_type="str",
     max_loops=1,
     verbose=True,
+    tools=[quiver_research],
+    context_length=16000,
+)
+
+risk_agent = Agent(
+    agent_name="Risk-Manager",
+    system_prompt=RISK_PROMPT.strip()
+    + "\n\nWhen you receive a message, it will contain:\nStock, Thesis, Quant Analysis, and Alternative-Data Research.\n\nProvide risk assessment including:\n1. Recommended position size\n2. Maximum drawdown risk\n3. Market risk exposure\n4. Overall risk score\n5. Conflicts or data-quality warnings\n\nUse trade_suggestion when explicit capital, protected reserve, entry, and stop values are available. Treat its result as a deterministic sizing calculation. Do not place or request an order. A user-entered amount is an explicit manual choice: calculate its downside and flag limit breaches rather than silently changing it.",
+    model_name="gpt-4.1",
+    output_type="str",
+    max_loops=1,
+    verbose=True,
+    tools=[trade_suggestion],
     context_length=16000,
 )
 
 execution_agent = Agent(
     agent_name="Execution-Agent",
     system_prompt=EXECUTION_PROMPT.strip()
-    + "\n\nWhen you receive a message, it will contain:\nStock, Thesis, Risk Assessment.\n\nGenerate trade order including:\n1. Order type (market/limit)\n2. Quantity\n3. Entry price\n4. Stop loss\n5. Take profit\n6. Time in force"
-    + _SYSTEM_SUFFIX,
+    + "\n\nWhen you receive a message, it will contain:\nStock, Thesis, Risk Assessment.\n\nGenerate trade order including:\n1. Order type (market/limit)\n2. Quantity\n3. Entry price\n4. Stop loss\n5. Take profit\n6. Time in force\n\nExecution is a separate stage from Trade Suggestion. Never treat a suggestion-button result as permission to submit an order.",
     model_name="gpt-4.1",
     output_type="str",
     max_loops=1,
@@ -59,8 +79,7 @@ execution_agent = Agent(
 quant_agent = Agent(
     agent_name="Quant-Analyst",
     system_prompt=QUANT_PROMPT.strip()
-    + "\n\nWhen you receive a message, it will contain:\nStock and Thesis from your Director.\n\nGenerate quantitative analysis with: ticker, technical_score (0-1), volume_score (0-1), trend_strength (0-1), volatility, probability_score (0-1), key_levels (support, resistance, pivot)."
-    + _SYSTEM_SUFFIX,
+    + "\n\nWhen you receive a message, it will contain:\nStock and Thesis from your Director.\n\nGenerate quantitative analysis with: ticker, technical_score (0-1), volume_score (0-1), trend_strength (0-1), volatility, probability_score (0-1), key_levels (support, resistance, pivot).",
     model_name="gpt-4.1",
     output_type="str",
     max_loops=1,
@@ -68,18 +87,20 @@ quant_agent = Agent(
     context_length=16000,
 )
 
-
 ALL_AGENTS = [
     sentiment_agent,
+    alternative_data_agent,
     risk_agent,
-    execution_agent,
     quant_agent,
 ]
 
-
 director_agent = Agent(
     agent_name="Trading-Director",
-    system_prompt=DIRECTOR_PROMPT + _SYSTEM_SUFFIX,
+    system_prompt=(
+        DIRECTOR_PROMPT
+        + "\n\nFor research, request Alternative-Data-Researcher evidence and treat it as one evidence layer alongside price, fundamental, sentiment, and risk analysis. Do not infer causation from congressional, insider, lobbying, or contract activity alone."
+        + _SYSTEM_SUFFIX
+    ),
     model_name="gpt-4.1",
     max_loops=1,
     handoffs=ALL_AGENTS,
